@@ -40,7 +40,8 @@ The module installs the plugin and runs `setup(settings)` for you.
 
 - `:BtwAsk [question]` / `:BtwComment [text]`: ask or queue a cursor/range reference.
 - `:BtwQueue` / `:BtwOpen {id}`: open a queue or thread in a vertical split.
-- `:BtwFollowup [question]` / `:BtwSend`: follow up or send the current BTW buffer.
+- `:BtwFollowup [question]`: follow up in the current thread.
+- `:BtwSend`: send the current BTW buffer, or the project queue from any other buffer.
 - `:BtwThreads`: list active-branch threads in quickfix; Enter opens one.
 - `:BtwList` / `:BtwConnect [pane]` / `:BtwStatus`: pick, target, or check Pi.
 

@@ -118,7 +118,8 @@ function M.send()
       return true
     end
   end
-  return false
+  queue(M.project()).send()
+  return true
 end
 
 return M

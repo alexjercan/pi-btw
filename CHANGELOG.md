@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Make `:BtwSend` send the current project's queue from outside BTW buffers without opening it.
+
 ## 0.1.1
 
 - Restore the bottom-right animated Pi request status for sending, queued, and running work.

@@ -36,8 +36,8 @@ function M.setup(options)
     M.open_thread(args.args)
   end, { nargs = 1, desc = "Alias for BtwOpen" })
   command("BtwSend", function()
-    if not require("pi_btw.threads").send() and not require("pi_btw.queue").send() then
-      vim.notify("Open a BTW thread or queue first", vim.log.levels.WARN)
+    if not require("pi_btw.threads").send() then
+      require("pi_btw.queue").send()
     end
   end)
   command("BtwFollowup", function(args)

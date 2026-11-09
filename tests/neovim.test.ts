@@ -341,6 +341,13 @@ test("editable project queue persists, batches, and retains failed or edited dra
     runLua(
       setup +
         `
+      local current, windows = vim.api.nvim_get_current_buf(), #vim.api.nvim_list_wins()
+      send()
+      assert(sent:find("Edited comment", 1, true), "Send must load the saved queue without opening it")
+      assert(vim.api.nvim_get_current_buf() == current and #vim.api.nvim_list_wins() == windows)
+      local first_send = accept
+      send(); assert(accept == first_send, "Do not send the queue twice while busy")
+      finish() -- failed send must retain the draft
       vim.cmd.BtwQueue()
       assert(text():find("Edited comment", 1, true), "Draft did not survive restart")
       local draft = text()
@@ -352,7 +359,14 @@ test("editable project queue persists, batches, and retains failed or edited dra
       send(); vim.api.nvim_buf_set_lines(0, 0, -1, false, { "Changed during send" }); accept(); finish()
       assert(text() == "Changed during send")
       send(); accept(); finish(); assert(text() == "")
+      queue.add(queue.project(), "Original project pending")
       vim.cmd.cd(${JSON.stringify(join(temp, "other"))})
+      vim.cmd.enew()
+      sent = nil
+      send(); assert(sent == nil, "An empty project queue must not send another project's draft")
+      queue.add(queue.project(), "Other project pending")
+      send(); assert(sent == "Other project pending")
+      accept(); finish()
       vim.cmd.BtwQueue(); assert(text() == "", "Queues must be project-specific")
     `,
       temp,
