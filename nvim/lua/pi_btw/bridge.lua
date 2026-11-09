@@ -115,6 +115,51 @@ function M.resolve(callback, cancelled)
   end
 end
 
+local function progress()
+  local width = math.min(26, math.max(1, vim.o.columns - 4))
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  local win = vim.api.nvim_open_win(buf, false, {
+    relative = "editor",
+    width = width,
+    height = 1,
+    row = math.max(0, vim.o.lines - 5),
+    col = math.max(0, vim.o.columns - width - 2),
+    style = "minimal",
+    border = "rounded",
+    focusable = false,
+    title = "Pi",
+  })
+  local timer = vim.uv.new_timer()
+  local frames = { "|", "/", "-", "\\" }
+  local frame, state, closed = 0, "sending", false
+  local function draw()
+    if closed or not vim.api.nvim_buf_is_valid(buf) then
+      return
+    end
+    frame = frame % #frames + 1
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { frames[frame] .. " " .. state })
+  end
+  draw()
+  timer:start(120, 120, vim.schedule_wrap(draw))
+  return function(next_state)
+    if closed then
+      return
+    end
+    if next_state then
+      state = next_state
+      draw()
+      return
+    end
+    closed = true
+    timer:stop()
+    timer:close()
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+  end
+end
+
 local function request(message, kind, accepted, finished, answer, thread_id, source)
   local function send(item)
     local current = target(item.pane)
@@ -128,6 +173,7 @@ local function request(message, kind, accepted, finished, answer, thread_id, sou
       end
       return
     end
+    local set_progress = progress()
     local pipe = vim.uv.new_pipe(false)
     local timer = vim.uv.new_timer()
     local done, acknowledged = false, false
@@ -138,6 +184,7 @@ local function request(message, kind, accepted, finished, answer, thread_id, sou
         return
       end
       done = true
+      set_progress()
       timer:stop()
       timer:close()
       if not pipe:is_closing() then
@@ -203,12 +250,12 @@ local function request(message, kind, accepted, finished, answer, thread_id, sou
             if not ok or type(response) ~= "table" or (response.id and response.id ~= id) then
               finish("Invalid Pi bridge response")
             elseif response.status == "running" or response.status == "queued" then
+              set_progress(response.status)
               if not acknowledged then
                 acknowledged = true
                 if kind == "prompt" or kind == "btw-promote" then
                   timer:stop()
                 end
-                vim.notify("Pi: " .. response.status)
                 if accepted then
                   accepted()
                 end

@@ -126,6 +126,97 @@ test("discovery is session-scoped, supports explicit panes, and rejects replaced
   }
 });
 
+test("bridge restores animated progress and cleans it up on every request outcome", () => {
+  runLua(`
+    require("pi_btw").setup()
+    local bridge = require("pi_btw.bridge")
+    local path = vim.fn.tempname()
+    local source = { pane = "%7", socket = path, label = "work:7.0" }
+    vim.fn.systemlist = function(args)
+      if args[2] == "show-options" then return { source.socket } end
+      if args[#args] == "#{pane_id}" then return { source.pane } end
+      return { source.label }
+    end
+    bridge.resolve = function(callback) callback(source) end
+    local notices = {}
+    vim.notify = function(message) table.insert(notices, message) end
+    local timers = {}
+    local new_timer = vim.uv.new_timer
+    vim.uv.new_timer = function()
+      local timer = new_timer()
+      table.insert(timers, timer)
+      return {
+        start = function(_, delay, interval, callback)
+          timer:start(delay == 130000 and 500 or delay, interval, callback)
+        end,
+        stop = function() timer:stop() end,
+        close = function() timer:close() end,
+      }
+    end
+    local server = vim.uv.new_pipe(false)
+    assert(server:bind(path))
+    local peer, received
+    server:listen(8, function()
+      peer = vim.uv.new_pipe(false)
+      server:accept(peer)
+      peer:read_start(function(_, chunk) if chunk then received = true end end)
+    end)
+    local function start()
+      received = false
+      local finished, accepted = 0, 0
+      local current = vim.api.nvim_get_current_win()
+      bridge.send("Test", function() accepted = accepted + 1 end, function() finished = finished + 1 end)
+      assert(vim.api.nvim_get_current_win() == current, "Progress must not steal focus")
+      local win
+      for _, item in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(item).relative == "editor" then win = item end
+      end
+      assert(win, "Missing progress float")
+      local config = vim.api.nvim_win_get_config(win)
+      assert(not config.focusable and config.row > vim.o.lines / 2 and config.col > vim.o.columns / 2)
+      local buf = vim.api.nvim_win_get_buf(win)
+      local function text() return vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1] end
+      assert(text() == "| sending")
+      return text, function()
+        assert(vim.wait(2000, function() return finished == 1 end))
+        assert(not vim.api.nvim_win_is_valid(win) and not vim.api.nvim_buf_is_valid(buf))
+        assert(timers[#timers]:is_closing() and timers[#timers - 1]:is_closing())
+        return accepted
+      end
+    end
+    local text, finish = start()
+    assert(vim.wait(1000, function() return received end))
+    peer:write('{"status":"queued"}\\n')
+    assert(vim.wait(1000, function() return text():find("queued", 1, true) end))
+    local frame = text():sub(1, 1)
+    assert(vim.wait(1000, function() return text():sub(1, 1) ~= frame end), "Spinner must animate")
+    peer:write('{"status":"running"}\\n')
+    assert(vim.wait(1000, function() return text():find("running", 1, true) end))
+    peer:write('{"status":"done"}\\n')
+    assert(finish() == 1, "Acceptance callback must only run once")
+    peer:close()
+    for _, outcome in ipairs({ "error", "disconnect", "invalid", "timeout" }) do
+      local _, cleanup = start()
+      assert(vim.wait(1000, function() return received end))
+      if outcome == "error" then peer:write('{"status":"error","error":"Rejected"}\\n')
+      elseif outcome == "disconnect" then peer:close()
+      elseif outcome == "invalid" then peer:write('not-json\\n') end
+      cleanup()
+      if not peer:is_closing() then peer:close() end
+    end
+    source.socket = path .. "-missing"
+    local _, cleanup = start()
+    cleanup()
+    assert(notices[#notices]:find("Cannot connect", 1, true))
+    server:close()
+    vim.fn.delete(path)
+    assert(vim.wait(150, function() return false end) == false) -- drain late spinner callbacks
+    for _, notice in ipairs(notices) do
+      assert(notice ~= "Pi: queued" and notice ~= "Pi: running")
+    end
+  `);
+});
+
 test("setup exposes commands without installing mappings", () => {
   runLua(`
     vim.g.mapleader = " "
