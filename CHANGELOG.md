@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Export a Nixvim module with `plugins.pi-btw.enable`, `package`, and `settings` options.
+
 - Discover and select Pi panes without fixed tmux window numbers.
 - Add Neovim `:Btw*` commands, target checks, and quickfix thread navigation.
 - Use split buffers for queues and threads; move keybindings to user configuration.

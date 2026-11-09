@@ -23,6 +23,21 @@ vim.opt.rtp:append(vim.fn.expand("~/personal/pi-btw/nvim"))
 require("pi_btw").setup()
 ```
 
+With Nixvim, use the module instead. Add `github:alexjercan/pi-btw` as a flake
+input and import it:
+
+```nix
+programs.nixvim = {
+  imports = [ inputs.pi-btw.nixvimModules.default ];
+  plugins.pi-btw = {
+    enable = true;
+    settings = {}; # Optional: { target = "%3"; }
+  };
+};
+```
+
+The module installs the plugin and runs `setup(settings)` for you.
+
 - `:BtwAsk [question]` / `:BtwComment [text]`: ask or queue a cursor/range reference.
 - `:BtwQueue` / `:BtwOpen {id}`: open a queue or thread in a vertical split.
 - `:BtwFollowup [question]` / `:BtwSend`: follow up or send the current BTW buffer.

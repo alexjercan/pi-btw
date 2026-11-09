@@ -14,6 +14,8 @@
     flake-parts.lib.mkFlake {inherit inputs;} {
       systems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin"];
 
+      flake.nixvimModules.default = import ./nix/nixvim.nix;
+
       perSystem = {
         pkgs,
         system,
@@ -61,6 +63,8 @@
         };
 
         checks = {
+          nixvim-module = import ./nix/tests/nixvim.nix {inherit pkgs;};
+
           package =
             pkgs.runCommand "pi-btw-package" {
               nativeBuildInputs = [nodejs pkgs.jq pkgs.neovim];
@@ -125,7 +129,7 @@
             pkgs.runCommand "pi-btw-nix-format" {
               nativeBuildInputs = [pkgs.alejandra pkgs.stylua];
             } ''
-              alejandra --check ${./flake.nix}
+              alejandra --check ${./flake.nix} ${./nix}
               stylua --check --config-path ${./stylua.toml} ${./nvim} ${./examples}
               touch "$out"
             '';
