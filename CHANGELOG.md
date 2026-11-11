@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Close the prompt window with `q` and show send hints in its footer, using the user's own keymaps when present.
+
 ## 0.2.1
 
 - Rename `:BtwQueue` to `:BtwPrompt`; the old name stays as an alias.

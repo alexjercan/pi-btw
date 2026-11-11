@@ -262,7 +262,24 @@ test("the prompt window is a floating modal that toggles, edits, and appends", (
       local config = vim.api.nvim_win_get_config(win)
       assert(config.border ~= "none" and config.width >= 20 and config.height >= 5)
       assert(vim.bo.modifiable and vim.bo.filetype == "markdown")
-      assert(#vim.api.nvim_buf_get_keymap(0, "n") == 0, "No buffer mappings in an editable prompt")
+      local maps = vim.api.nvim_buf_get_keymap(0, "n")
+      assert(#maps == 1 and maps[1].lhs == "q", "Only q is mapped in the editable prompt")
+      local function footer()
+        local text = ""
+        for _, part in ipairs(vim.api.nvim_win_get_config(float()).footer) do text = text .. part[1] end
+        return text
+      end
+      assert(footer():find("q close", 1, true) and footer():find(":BtwSendRequest send to Pi", 1, true), footer())
+      assert(footer():find(":BtwSendThread send to thread", 1, true), footer())
+      vim.cmd.normal("q")
+      assert(not float() and vim.api.nvim_get_current_win() == code, "q closes the prompt")
+      vim.g.mapleader = " "
+      vim.keymap.set("n", "<leader>bp", "<cmd>BtwSendRequest<CR>")
+      vim.keymap.set("n", "<leader>bt", ":BtwSendThread<CR>")
+      vim.cmd.BtwPrompt()
+      assert(footer():find("<leader>bp send to Pi | <leader>bt send to thread", 1, true), footer())
+      vim.keymap.del("n", "<leader>bp"); vim.keymap.del("n", "<leader>bt")
+      vim.g.mapleader = nil
       vim.cmd.BtwPrompt() -- alias
       assert(not float() and vim.api.nvim_get_current_win() == code, "Toggle closes the float")
       queue.add(queue.project(), "/tmp/a.lua:3-5\\nFirst note")

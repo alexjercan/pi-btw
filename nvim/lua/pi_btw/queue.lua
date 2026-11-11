@@ -84,6 +84,25 @@ function M.add(project, message)
   end
 end
 
+-- The user's normal-mode key for a command, or the command itself.
+local function hint(command)
+  for _, map in ipairs(vim.api.nvim_get_keymap("n")) do
+    local rhs = map.rhs or ""
+    if
+      rhs:find("<[Cc]md>" .. command .. "<[Cc][Rr]>", 1)
+      or rhs:find(":" .. command .. "<[Cc][Rr]>", 1)
+    then
+      local lhs = map.lhs
+      local leader = vim.g.mapleader
+      if type(leader) == "string" and leader ~= "" and lhs:sub(1, #leader) == leader then
+        lhs = "<leader>" .. lhs:sub(#leader + 1)
+      end
+      return lhs
+    end
+  end
+  return ":" .. command
+end
+
 -- Toggle the floating prompt window: open it, focus it, or close it.
 function M.open()
   local state = queue(M.project())
@@ -108,10 +127,19 @@ function M.open()
     border = "rounded",
     title = " BTW prompt ",
     title_pos = "center",
+    footer = " " .. table.concat({
+      "q close",
+      hint("BtwSendRequest") .. " send to Pi",
+      hint("BtwSendThread") .. " send to thread",
+    }, " | ") .. " ",
+    footer_pos = "center",
   })
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
   vim.api.nvim_win_set_cursor(win, { vim.api.nvim_buf_line_count(state.buf), 0 })
+  vim.keymap.set("n", "q", function()
+    close(state)
+  end, { buffer = state.buf, desc = "Close the BTW prompt" })
 end
 
 -- Deliver the draft through `transport(message, accepted, finished)`.

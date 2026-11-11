@@ -89,7 +89,8 @@ suggested `<leader>b` set, where a capital letter means "quick":
    command range, then asks for a note. Netrw selections add file and folder
    paths. An empty note keeps only the reference.
 2. `:BtwPrompt` shows the prompt. Edit it freely; it is saved per project and
-   survives restarts. New annotations append at the end. `:BtwQueue` is an
+   survives restarts. New annotations append at the end. `q` closes the
+   window, and its footer shows your keys for sending. `:BtwQueue` is an
    alias.
 3. `:BtwSendRequest` sends the prompt to the main Pi agent. `:BtwSendThread`
    sends it to the given thread, else to the thread you are in or the last
