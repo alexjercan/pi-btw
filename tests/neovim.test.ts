@@ -224,14 +224,14 @@ test("setup exposes commands without installing mappings", () => {
     plugin.setup({ target = "%42" })
     plugin.setup({ target = "%42" }) -- setup is repeatable
     assert(require("pi_btw.config").options.target == "%42")
-    for _, name in ipairs({ "BtwNote", "BtwAsk", "BtwRequest", "BtwQueue", "BtwSend", "BtwSendRequest", "BtwSendThread", "BtwThreads", "BtwOpen", "BtwConnect", "BtwList", "BtwStatus" }) do
+    for _, name in ipairs({ "BtwNote", "BtwAsk", "BtwRequest", "BtwPrompt", "BtwQueue", "BtwSendRequest", "BtwSendThread", "BtwThreads", "BtwOpen", "BtwConnect", "BtwStatus" }) do
       assert(vim.fn.exists(":" .. name) == 2, name)
     end
-    for _, gone in ipairs({ "BtwComment", "BtwFollowup", "PiBtw" }) do
-      assert(vim.fn.exists(":" .. gone) == 0, gone)
+    for _, gone in ipairs({ "BtwSend", "BtwList", "BtwComment", "BtwFollowup", "PiBtw" }) do
+      assert(vim.fn.exists(":" .. gone) ~= 2, gone) -- 1 is a prefix of BtwSendRequest
     end
     for _, mode in ipairs({ "n", "x" }) do
-      for _, key in ipairs({ "bn", "bb", "bq", "bp", "bt", "br" }) do assert(vim.fn.maparg(" " .. key, mode) == "") end
+      for _, key in ipairs({ "bn", "be", "bp", "bt", "bo", "bT", "bP" }) do assert(vim.fn.maparg(" " .. key, mode) == "") end
     end
     assert(#vim.api.nvim_buf_get_keymap(0, "n") == 0)
   `);
@@ -256,17 +256,17 @@ test("the prompt window is a floating modal that toggles, edits, and appends", (
       setup +
         `
       local code = vim.api.nvim_get_current_win()
-      vim.cmd.BtwQueue()
+      vim.cmd.BtwPrompt()
       local win = float()
       assert(win and win == vim.api.nvim_get_current_win(), "Prompt must open as a focused float")
       local config = vim.api.nvim_win_get_config(win)
       assert(config.border ~= "none" and config.width >= 20 and config.height >= 5)
       assert(vim.bo.modifiable and vim.bo.filetype == "markdown")
       assert(#vim.api.nvim_buf_get_keymap(0, "n") == 0, "No buffer mappings in an editable prompt")
-      vim.cmd.BtwQueue()
+      vim.cmd.BtwPrompt() -- alias
       assert(not float() and vim.api.nvim_get_current_win() == code, "Toggle closes the float")
       queue.add(queue.project(), "/tmp/a.lua:3-5\\nFirst note")
-      vim.cmd.BtwQueue()
+      vim.cmd.BtwPrompt()
       assert(text() == "/tmp/a.lua:3-5\\nFirst note")
       vim.api.nvim_buf_set_lines(0, -1, -1, false, { "Typed inside the modal" })
       vim.api.nvim_win_set_cursor(0, { 2, 3 })
@@ -275,7 +275,7 @@ test("the prompt window is a floating modal that toggles, edits, and appends", (
       assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), { 2, 3 }), "Appending must not move the cursor")
       vim.api.nvim_set_current_win(code)
       assert(float(), "Leaving keeps the float open")
-      vim.cmd.BtwQueue()
+      vim.cmd.BtwPrompt()
       assert(vim.api.nvim_get_current_win() == float(), "Toggle focuses an open float")
     `,
       temp,
@@ -283,7 +283,7 @@ test("the prompt window is a floating modal that toggles, edits, and appends", (
     runLua(
       setup +
         `
-      vim.cmd.BtwQueue()
+      vim.cmd.BtwPrompt()
       assert(text():find("Typed inside the modal", 1, true), "Draft must survive restart")
       assert(text():find("Second note", 1, true))
     `,
@@ -294,7 +294,7 @@ test("the prompt window is a floating modal that toggles, edits, and appends", (
   }
 });
 
-test("sending the prompt goes to Pi outside threads and clears only unchanged drafts", () => {
+test("sending the prompt to Pi clears only unchanged drafts", () => {
   const temp = mkdtempSync(join(tmpdir(), "pi-send-test-"));
   mkdirSync(join(temp, "project", ".git"), { recursive: true });
   mkdirSync(join(temp, "other"));
@@ -307,7 +307,7 @@ test("sending the prompt goes to Pi outside threads and clears only unchanged dr
       ask = function() error("Must not ask a thread outside thread buffers") end,
     }
     local queue = require("pi_btw.queue")
-    local function send() vim.cmd.BtwSend() end
+    local function send() vim.cmd.BtwSendRequest() end
     local function text() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\\n") end
     local function float()
       for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -327,7 +327,7 @@ test("sending the prompt goes to Pi outside threads and clears only unchanged dr
       local first_send = accept
       send(); assert(accept == first_send, "Do not send the prompt twice while busy")
       finish() -- failed send must retain the draft
-      vim.cmd.BtwQueue()
+      vim.cmd.BtwPrompt()
       assert(text():find("Edited comment", 1, true))
       local draft = text()
       send(); assert(sent == draft); finish()
@@ -341,8 +341,8 @@ test("sending the prompt goes to Pi outside threads and clears only unchanged dr
       assert(float(), "An edited draft keeps the modal open")
       send(); accept(); finish()
       assert(not float(), "A sent prompt closes the modal")
-      vim.cmd.BtwQueue(); assert(text() == "")
-      vim.cmd.BtwQueue()
+      vim.cmd.BtwPrompt(); assert(text() == "")
+      vim.cmd.BtwPrompt()
       queue.add(queue.project(), "Original project pending")
       vim.cmd.cd(${JSON.stringify(join(temp, "other"))})
       vim.cmd.enew()
@@ -351,7 +351,7 @@ test("sending the prompt goes to Pi outside threads and clears only unchanged dr
       queue.add(queue.project(), "Other project pending")
       vim.cmd.BtwSendRequest(); assert(sent == "Other project pending")
       accept(); finish()
-      vim.cmd.BtwQueue(); assert(text() == "", "Prompts are project-specific")
+      vim.cmd.BtwPrompt(); assert(text() == "", "Prompts are project-specific")
     `,
       temp,
     );
@@ -360,7 +360,7 @@ test("sending the prompt goes to Pi outside threads and clears only unchanged dr
   }
 });
 
-test("thread splits are read-only chats; sending inside one continues it", () => {
+test("thread splits are read-only chats; BtwSendThread continues the open one", () => {
   const temp = mkdtempSync(join(tmpdir(), "pi-thread-test-"));
   mkdirSync(join(temp, "project", ".git"), { recursive: true });
   try {
@@ -397,14 +397,14 @@ test("thread splits are read-only chats; sending inside one continues it", () =>
     assert(vim.api.nvim_win_get_cursor(0)[1] == vim.api.nvim_buf_line_count(0), "Latest answer is in view")
     -- Sending inside the thread continues it and clears the prompt.
     queue.add(queue.project(), "/code.ts:9\\nFollow up")
-    vim.cmd.BtwSend()
+    vim.cmd.BtwSendThread()
     assert(#asked == 2 and asked[2].id == thread.id and asked[2].question == "/code.ts:9\\nFollow up")
     assert(#thread.exchanges == 2 and prompts == 0)
-    vim.cmd.BtwQueue(); assert(text() == "", "Accepted prompt is cleared"); vim.cmd.BtwQueue()
-    -- Sending from the code window goes to Pi, not the thread.
+    vim.cmd.BtwPrompt(); assert(text() == "", "Accepted prompt is cleared"); vim.cmd.BtwPrompt()
+    -- A request from the code window goes to Pi, not the thread.
     vim.api.nvim_set_current_win(code)
     queue.add(queue.project(), "Main request")
-    vim.cmd.BtwSend()
+    vim.cmd.BtwSendRequest()
     assert(prompts == 1 and #asked == 2)
     -- BtwSendThread from code continues the visible thread; BtwAsk too.
     queue.add(queue.project(), "Thread request")
@@ -421,7 +421,7 @@ test("thread splits are read-only chats; sending inside one continues it", () =>
     assert(asked[#asked].question == "Inside" and asked[#asked].id == thread.id)
     -- Late replies after closing never reopen the split.
     queue.add(queue.project(), "Late")
-    vim.cmd.BtwSend()
+    vim.cmd.BtwSendThread()
     assert(text():find("Waiting for Pi", 1, true))
     vim.cmd.close()
     local count = #vim.api.nvim_list_wins()

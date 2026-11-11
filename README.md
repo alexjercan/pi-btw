@@ -70,39 +70,40 @@ programs.nixvim = {
 ```
 
 The module installs the plugin and runs `setup(settings)` for you. There are
-no built-in keybindings; see [examples/neovim.lua](examples/neovim.lua) for the
-suggested `<leader>b` set.
+no built-in keybindings; [examples/neovim.lua](examples/neovim.lua) has the
+suggested `<leader>b` set, where a capital letter means "quick":
+
+| Key          | Command                   | Does                                                   |
+| ------------ | ------------------------- | ------------------------------------------------------ |
+| `<leader>bn` | `:BtwNote [text]`         | Annotate the line, selection, or range into the prompt |
+| `<leader>be` | `:BtwPrompt`              | Toggle the prompt in a floating window and edit it     |
+| `<leader>bp` | `:BtwSendRequest`         | Send the prompt to Pi as a request                     |
+| `<leader>bt` | `:BtwSendThread [btw-ID]` | Send the prompt to a thread                            |
+| `<leader>bo` | `:BtwThreads`             | Pick a thread and open it in a vertical split          |
+| `<leader>bT` | `:BtwAsk [text]`          | Annotate and ask a thread at once                      |
+| `<leader>bP` | `:BtwRequest [text]`      | Annotate and send a Pi request at once                 |
 
 ### Workflow
 
-1. `:BtwNote [text]` (`<leader>bn`): add an annotation to the prompt. It
-   records the file and the cursor line, a visual selection, or a command
-   range, then asks for a note. Netrw selections add file and folder paths.
-   An empty note keeps only the reference.
-2. `:BtwQueue` (`<leader>bq`): toggle the prompt in a floating window. Edit it
-   freely; it is saved per project and survives restarts. New annotations
-   append at the end.
-3. `:BtwSend` (`<leader>bp`): inside a thread window, the prompt continues
-   that thread. Anywhere else it goes to the main Pi agent as a request. The
-   prompt is cleared once Pi accepts it.
-4. `:BtwThreads` (`<leader>bt`): pick one of Pi's threads and open it in a
-   vertical split. Thread windows are read-only chats; copy from them freely.
+1. `:BtwNote` records the file and the cursor line, a visual selection, or a
+   command range, then asks for a note. Netrw selections add file and folder
+   paths. An empty note keeps only the reference.
+2. `:BtwPrompt` shows the prompt. Edit it freely; it is saved per project and
+   survives restarts. New annotations append at the end. `:BtwQueue` is an
+   alias.
+3. `:BtwSendRequest` sends the prompt to the main Pi agent. `:BtwSendThread`
+   sends it to the given thread, else to the thread you are in or the last
+   one still open in the tab, else it starts a new thread. The prompt is
+   cleared once Pi accepts it.
+4. `:BtwThreads` picks one of Pi's threads. Thread windows are read-only
+   chats; copy from them freely. `:BtwOpen {btw-ID}` opens one by ID, for
+   example one seen in Pi.
 
-Explicit targets:
+`:BtwAsk` and `:BtwRequest` skip the prompt: they annotate and send at once.
+`:BtwAsk` targets the open thread like `:BtwSendThread`, and inside a thread
+window it is a plain follow-up.
 
-- `:BtwSendRequest`: send the prompt to Pi.
-- `:BtwSendThread [btw-ID]`: send the prompt to the given thread, else to the
-  current or last open thread, else start a new thread.
-- `:BtwOpen {btw-ID}`: open a thread by ID, for example one seen in Pi.
-
-Shortcuts that skip the prompt window:
-
-- `:BtwAsk [text]` (`<leader>bb`): annotate and ask in the current or last
-  open thread, or start a new one. Inside a thread window it is a plain
-  follow-up.
-- `:BtwRequest [text]`: annotate and send a request to Pi.
-
-Connection commands: `:BtwList` / `:BtwConnect [pane]` / `:BtwStatus` pick,
-target, or check Pi. One Pi is selected automatically; multiple instances
-prompt for a choice. Use `setup({ target = "%3" })` for a default pane, even in
+Connection commands: `:BtwConnect` picks a Pi pane, `:BtwConnect %3` targets
+one directly, and `:BtwStatus` shows the current target. One Pi is selected
+automatically; multiple instances prompt for a choice. Use `setup({ target = "%3" })` for a default pane, even in
 another tmux session.

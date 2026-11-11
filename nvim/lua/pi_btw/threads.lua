@@ -70,7 +70,7 @@ local function draw(state)
   local lines = {
     "# BTW " .. state.id,
     "",
-    state.busy and "Waiting for Pi..." or "Read-only thread. :BtwSend here continues it.",
+    state.busy and "Waiting for Pi..." or "Read-only thread. :BtwSendThread continues it.",
   }
   for _, exchange in ipairs(state.thread.exchanges) do
     vim.list_extend(lines, { "", "---", "", "## You", "" })

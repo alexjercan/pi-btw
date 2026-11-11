@@ -4,16 +4,12 @@ require("pi_btw").setup({
   -- target = "%3", -- Optional tmux pane; otherwise discover in this session.
 })
 
--- Build a prompt from code annotations, then send it to a thread or to Pi.
+-- Build: n(ote) and e(dit). Send: to P(i) or to t(hread). o(pen) a thread.
 vim.keymap.set({ "n", "x" }, "<leader>bn", ":BtwNote<CR>", { desc = "BTW: annotate into prompt" })
-vim.keymap.set("n", "<leader>bq", "<cmd>BtwQueue<CR>", { desc = "BTW: toggle prompt window" })
-vim.keymap.set("n", "<leader>bp", "<cmd>BtwSend<CR>", { desc = "BTW: send prompt (thread or Pi)" })
-vim.keymap.set("n", "<leader>bt", "<cmd>BtwThreads<CR>", { desc = "BTW: pick a thread" })
--- Shortcuts that skip the prompt window.
-vim.keymap.set({ "n", "x" }, "<leader>bb", ":BtwAsk<CR>", { desc = "BTW: annotate and ask thread" })
-vim.keymap.set(
-  { "n", "x" },
-  "<leader>br",
-  ":BtwRequest<CR>",
-  { desc = "BTW: annotate and request" }
-)
+vim.keymap.set("n", "<leader>be", "<cmd>BtwPrompt<CR>", { desc = "BTW: edit prompt" })
+vim.keymap.set("n", "<leader>bp", "<cmd>BtwSendRequest<CR>", { desc = "BTW: send prompt to Pi" })
+vim.keymap.set("n", "<leader>bt", "<cmd>BtwSendThread<CR>", { desc = "BTW: send prompt to thread" })
+vim.keymap.set("n", "<leader>bo", "<cmd>BtwThreads<CR>", { desc = "BTW: open a thread" })
+-- Shift means quick: annotate and send at once, skipping the prompt.
+vim.keymap.set({ "n", "x" }, "<leader>bT", ":BtwAsk<CR>", { desc = "BTW: quick ask thread" })
+vim.keymap.set({ "n", "x" }, "<leader>bP", ":BtwRequest<CR>", { desc = "BTW: quick request to Pi" })

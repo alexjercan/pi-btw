@@ -31,7 +31,7 @@
     package = pkgs.emptyDirectory;
   };
   smokeTest = pkgs.writeText "pi-btw-nixvim-smoke.lua" ''
-    for _, name in ipairs({ "BtwNote", "BtwAsk", "BtwRequest", "BtwQueue", "BtwSend", "BtwSendRequest", "BtwSendThread", "BtwOpen", "BtwThreads", "BtwList", "BtwConnect", "BtwStatus" }) do
+    for _, name in ipairs({ "BtwNote", "BtwAsk", "BtwRequest", "BtwPrompt", "BtwQueue", "BtwSendRequest", "BtwSendThread", "BtwOpen", "BtwThreads", "BtwConnect", "BtwStatus" }) do
       assert(vim.fn.exists(":" .. name) == 2, name)
     end
     assert(require("pi_btw.config").options.target == vim.env.EXPECTED_TARGET)

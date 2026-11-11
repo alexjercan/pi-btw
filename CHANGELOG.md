@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Rename `:BtwQueue` to `:BtwPrompt`; the old name stays as an alias.
+- Remove `:BtwSend`. Use `:BtwSendRequest` or `:BtwSendThread`.
+- Remove `:BtwList`. `:BtwConnect` without an argument opens the same picker.
+- Suggest the `<leader>b` keymap set where a capital letter means a quick ask or request.
+
 ## 0.2.0
 
 - Configure the side model with a `btw` key in Pi's `settings.json`: `model` and `thinkingLevel`, with project settings overriding global ones.

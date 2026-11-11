@@ -32,15 +32,6 @@ function M.send_thread(id)
   end)
 end
 
--- Inside a thread the prompt continues it; anywhere else it goes to Pi.
-function M.send()
-  if require("pi_btw.threads").current() then
-    M.send_thread()
-  else
-    M.send_request()
-  end
-end
-
 function M.note(visual, options)
   capture(visual, options, "BTW note", function(message)
     local queue = require("pi_btw.queue")
@@ -61,7 +52,7 @@ function M.request(visual, options)
   end)
 end
 
-function M.open_queue()
+function M.open_prompt()
   require("pi_btw.queue").open()
 end
 
@@ -89,8 +80,8 @@ function M.setup(options)
   command("BtwRequest", function(args)
     M.request(false, args)
   end, vim.tbl_extend("force", annotate, { desc = "Annotate and send a Pi request" }))
-  command("BtwQueue", M.open_queue, { desc = "Toggle the BTW prompt window" })
-  command("BtwSend", M.send, { desc = "Send the prompt to the current thread or to Pi" })
+  command("BtwPrompt", M.open_prompt, { desc = "Toggle the BTW prompt window" })
+  command("BtwQueue", M.open_prompt, { desc = "Alias for BtwPrompt" })
   command("BtwSendRequest", M.send_request, { desc = "Send the prompt to Pi" })
   command("BtwSendThread", function(args)
     M.send_thread(args.args)
@@ -103,15 +94,13 @@ function M.setup(options)
     require("pi_btw.bridge").connect(args.args)
   end, {
     nargs = "?",
+    desc = "Pick a Pi pane, or target the given one",
     complete = function()
       return vim.tbl_map(function(item)
         return item.pane
       end, require("pi_btw.bridge").list())
     end,
   })
-  command("BtwList", function()
-    require("pi_btw.bridge").connect()
-  end)
   command("BtwStatus", function()
     require("pi_btw.bridge").status()
   end)
