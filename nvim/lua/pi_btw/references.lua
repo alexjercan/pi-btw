@@ -1,13 +1,15 @@
+-- Build annotations: a file reference for the cursor line, a visual selection,
+-- or a command range, followed by the user's note.
 local M = {}
 
 local function netrw_locations(first, last)
   if (vim.b.netrw_liststyle or vim.w.netrw_liststyle or vim.g.netrw_liststyle or 0) ~= 0 then
-    vim.notify("Use netrw thin listing (i) for Pi file comments", vim.log.levels.WARN)
+    vim.notify("Use netrw thin listing (i) for BTW annotations", vim.log.levels.WARN)
     return
   end
   local directory = vim.b.netrw_curdir
   if not directory or directory:match("^%a+://") then
-    vim.notify("Pi comments require a local netrw directory", vim.log.levels.WARN)
+    vim.notify("BTW annotations require a local netrw directory", vim.log.levels.WARN)
     return
   end
   local locations = {}
@@ -27,67 +29,56 @@ local function netrw_locations(first, last)
   return table.concat(locations, "\n")
 end
 
-local function prompt_pi(visual, btw, options)
-  options = options or {}
+-- Returns the reference block and a short label, or nil when the current
+-- buffer is not a file. `false` means the user must be warned and stop.
+local function reference(visual, options)
   local name = vim.api.nvim_buf_get_name(0)
-  if name == "" then
-    vim.notify("No filename to copy", vim.log.levels.WARN)
-    return
-  end
-
-  local path = vim.fn.fnamemodify(name, ":.")
   local first = vim.fn.line(".")
   local last = first
   if visual then
     last = vim.fn.line("v")
     first, last = math.min(first, last), math.max(first, last)
   end
-
   first = options.line1 or first
   last = options.line2 or last
-  visual = visual or options.range and options.range > 0
-  local location
-  local reference
   if vim.bo.filetype == "netrw" then
-    location = netrw_locations(first, last)
+    local location = netrw_locations(first, last)
     if not location then
-      return
+      return false
     end
-    reference = "Files/folders: " .. (last - first + 1)
-  else
-    location = name .. ":" .. first .. (visual and ("-" .. last) or "")
-    reference = path .. ":" .. first .. (visual and ("-" .. last) or "")
+    return location, "files/folders: " .. (last - first + 1)
   end
-  local project = require("pi_btw.queue").project()
-  local function submit(text)
-    if not text then
+  if name == "" or vim.bo.buftype ~= "" then
+    return nil
+  end
+  local span = first .. (last > first and ("-" .. last) or "")
+  return name .. ":" .. span, vim.fn.fnamemodify(name, ":.") .. ":" .. span
+end
+
+-- Compose an annotation and hand it to `submit`. With no argument text the
+-- note is asked for; an empty note keeps only the reference.
+function M.capture(visual, options, label, submit)
+  options = options or {}
+  local location, short = reference(visual or false, options)
+  if location == false then
+    return
+  end
+  local function finish(text)
+    if text == nil then
       return
     end
     text = vim.trim(text)
-    if text == "" then
-      return
-    end
-    local message = text .. "\n\n" .. location
-    if btw then
-      require("pi_btw.threads").ask(message)
-    else
-      require("pi_btw.queue").add(project, message)
+    if location then
+      submit(text ~= "" and (location .. "\n" .. text) or location)
+    elseif text ~= "" then
+      submit(text)
     end
   end
-
   if options.args and options.args ~= "" then
-    submit(options.args)
+    finish(options.args)
   else
-    vim.ui.input({ prompt = (btw and "BTW: " or "Queue: ") .. reference .. ": " }, submit)
+    vim.ui.input({ prompt = label .. (short and (" " .. short) or "") .. ": " }, finish)
   end
-end
-
-function M.comment(visual, options)
-  prompt_pi(visual, false, options)
-end
-
-function M.ask(visual, options)
-  prompt_pi(visual, true, options)
 end
 
 return M

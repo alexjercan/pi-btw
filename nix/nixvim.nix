@@ -8,7 +8,7 @@
   manifest = lib.importJSON ../package.json;
 in {
   options.plugins.pi-btw = {
-    enable = lib.mkEnableOption "Pi side threads and the Neovim request queue";
+    enable = lib.mkEnableOption "Pi side threads and the Neovim prompt builder";
 
     package = lib.mkOption {
       type = lib.types.package;

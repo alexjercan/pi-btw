@@ -1,5 +1,5 @@
 {
-  description = "Read-only Pi side threads and editable Neovim request queues";
+  description = "Read-only Pi side threads and a Neovim prompt builder";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

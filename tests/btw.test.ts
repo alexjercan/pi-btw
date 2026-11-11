@@ -8,10 +8,10 @@ import type {
 import {
   createBtw,
   registerBtwCommand,
-  formatBtwRequest,
   type AnswerBtw,
   type BtwThread,
 } from "../extensions/pi-btw/btw.ts";
+import type { BtwSettings } from "../extensions/pi-btw/settings.ts";
 
 function serviceHarness() {
   const branch: any[] = [
@@ -108,21 +108,41 @@ function serviceHarness() {
       };
     },
   };
+  const models = [
+    { id: "main", provider: "anthropic" },
+    { id: "gpt-6-luna", provider: "openai" },
+    { id: "gpt-6-luna", provider: "openai-codex" },
+  ];
   const ctx = {
     cwd: "/project",
-    model: { id: "model" },
+    model: models[0],
+    modelRegistry: {
+      getAvailable: () => models,
+      find: (provider: string, id: string) =>
+        models.find((model) => model.provider === provider && model.id === id),
+    },
     sessionManager: {
       getBranch: () => branch,
       getSessionId: () => "main-session",
     },
   } as never;
-  const create = () => createBtw(pi as never, sdk as never, Text as never);
+  let settings: BtwSettings = {};
+  const loads: string[] = [];
+  const create = () =>
+    createBtw(pi as never, sdk as never, Text as never, (context) => {
+      loads.push((context as any).cwd);
+      return settings;
+    });
   return {
     ctx,
     branch,
     resources,
     options,
     create,
+    loads,
+    setSettings(value: BtwSettings) {
+      settings = value;
+    },
     get snapshots() {
       return snapshots;
     },
@@ -141,7 +161,7 @@ function serviceHarness() {
     render(data: unknown) {
       return renderer!(
         { data },
-        { expanded: true },
+        { expanded: false },
         { fg: (_: string, text: string) => text },
       ).text;
     },
@@ -162,6 +182,8 @@ test("BTW persists thread IDs and full read-only history, and restores follow-up
   ]);
   assert.deepEqual(h.options[0].tools, ["read", "grep", "find", "ls"]);
   assert.equal(h.options[0].model, (h.ctx as any).model);
+  assert.equal(h.options[0].thinkingLevel, "off");
+  assert.deepEqual(h.loads, ["/project"]);
   for (const key of [
     "noExtensions",
     "noSkills",
@@ -179,8 +201,11 @@ test("BTW persists thread IDs and full read-only history, and restores follow-up
     JSON.stringify(h.options[0].sessionManager.getEntries()),
     /Main task snapshot/,
   );
-  assert.match(h.render(h.branch.at(-1).data), new RegExp(first.id));
-  assert.match(h.render(h.branch.at(-1).data), /Answer 1/);
+  const card = h.render(h.branch.at(-1).data);
+  assert.match(card, new RegExp(`BTW ${first.id}`));
+  assert.match(card, new RegExp(`/btw ${first.id}`));
+  assert.match(card, /Why\?\n\n\/project\/code\.ts:4\n\nAnswer 1$/);
+  assert.doesNotMatch(card, /expand/, "Cards show the full answer for copying");
   first.exchanges[0]!.answer = "Tampered";
   assert.equal(
     service.getThread(first.id, h.ctx).exchanges[0]!.answer,
@@ -210,9 +235,6 @@ test("BTW persists thread IDs and full read-only history, and restores follow-up
     2,
     "Idle threads must not retain live SDK resources",
   );
-  assert.match(formatBtwRequest(next), /Why\?/);
-  assert.match(formatBtwRequest(next), /How can we improve it\?/);
-  assert.match(formatBtwRequest(next), /Answer 2/);
   assert.deepEqual(reloaded.getThread(first.id, h.ctx), next);
   assert.deepEqual(reloaded.listThreads(h.ctx), [
     { id: first.id, question: "Why?\n\n/project/code.ts:4" },
@@ -234,6 +256,50 @@ test("BTW persists thread IDs and full read-only history, and restores follow-up
   await assert.rejects(
     reloaded.ask("Follow up", h.ctx, new AbortController().signal, first.id),
     /Unknown BTW thread/,
+  );
+});
+
+test("BTW applies the configured model and thinking level per question and keeps tools read-only", async () => {
+  const h = serviceHarness();
+  const service = h.create();
+  h.setSettings({ model: "gpt-6-luna", thinkingLevel: "medium" });
+  const first = await service.ask("Why?", h.ctx, new AbortController().signal);
+  assert.deepEqual(h.options[0].model, {
+    id: "gpt-6-luna",
+    provider: "openai",
+  });
+  assert.equal(h.options[0].thinkingLevel, "medium");
+  assert.deepEqual(h.options[0].tools, ["read", "grep", "find", "ls"]);
+  assert.equal(h.resources[0].noSkills, true);
+
+  h.setSettings({ model: "openai-codex/gpt-6-luna", thinkingLevel: "high" });
+  await service.ask("Again?", h.ctx, new AbortController().signal, first.id);
+  assert.deepEqual(h.options[1].model, {
+    id: "gpt-6-luna",
+    provider: "openai-codex",
+  });
+  assert.equal(h.options[1].thinkingLevel, "high");
+
+  h.setSettings({ model: "missing-model" });
+  await assert.rejects(
+    service.ask("Lost?", h.ctx, new AbortController().signal),
+    /BTW model is not available: missing-model/,
+  );
+  assert.equal(h.options.length, 2, "Unavailable models must not start work");
+  assert.equal(
+    h.branch.filter((entry) => entry.type === "custom").length,
+    2,
+    "Configuration errors are not recorded as thread exchanges",
+  );
+
+  h.setSettings({});
+  await assert.rejects(
+    service.ask(
+      "Why?",
+      { ...(h.ctx as any), model: undefined },
+      new AbortController().signal,
+    ),
+    /No Pi model selected/,
   );
 });
 

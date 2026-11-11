@@ -324,41 +324,6 @@ test("routes user messages through the registered Pi pane and reports completion
       "Opening and following up must not contact the main agent",
     );
 
-    const promoted = connect(path);
-    promoted.write(
-      JSON.stringify({
-        id: "promote",
-        kind: "btw-promote",
-        message: "Untrusted client text",
-        threadId: "btw-12345678",
-      }) + "\n",
-    );
-    assert.deepEqual(await readLine(promoted), {
-      id: "promote",
-      status: "queued",
-    });
-    assert.equal(calls.length, 4);
-    assert.match(calls[3]!.message, /Complete discussion/);
-    assert.doesNotMatch(calls[3]!.message, /Untrusted client text/);
-    assert.deepEqual(calls[3]!.options, { deliverAs: "followUp" });
-    const promotionDone = readLine(promoted);
-    handlers.get("agent_settled")!({});
-    assert.deepEqual(await promotionDone, { status: "done" });
-    promoted.destroy();
-
-    const unknown = connect(path);
-    unknown.write(
-      JSON.stringify({
-        id: "unknown",
-        kind: "btw-promote",
-        message: "Send",
-        threadId: "btw-00000000",
-      }) + "\n",
-    );
-    assert.match(String((await readLine(unknown)).error), /Unknown BTW thread/);
-    assert.equal(calls.length, 4);
-    unknown.destroy();
-
     const cancelled = connect(path);
     cancelled.write(
       JSON.stringify({

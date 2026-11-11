@@ -6,7 +6,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { formatBtwRequest, type BtwService } from "./btw.ts";
+import type { BtwService } from "./btw.ts";
 
 const OPTION = "@pi_nvim_socket";
 const MAX_MESSAGE = 64 * 1024;
@@ -14,7 +14,7 @@ const MAX_MESSAGE = 64 * 1024;
 type Request = {
   id: string;
   message: string;
-  kind?: "prompt" | "btw" | "btw-open" | "btw-promote" | "info" | "btw-list";
+  kind?: "prompt" | "btw" | "btw-open" | "info" | "btw-list";
   threadId?: string;
 };
 
@@ -108,14 +108,9 @@ export function createBridge(pi: ExtensionAPI, btw: BtwService) {
               !request.message.trim() ||
               Buffer.byteLength(request.message) > MAX_MESSAGE ||
               (request.kind !== undefined &&
-                ![
-                  "prompt",
-                  "btw",
-                  "btw-open",
-                  "btw-promote",
-                  "info",
-                  "btw-list",
-                ].includes(request.kind)) ||
+                !["prompt", "btw", "btw-open", "info", "btw-list"].includes(
+                  request.kind,
+                )) ||
               (request.threadId !== undefined &&
                 (typeof request.threadId !== "string" ||
                   !/^btw-[a-f0-9]{8}$/.test(request.threadId)))
@@ -139,16 +134,13 @@ export function createBridge(pi: ExtensionAPI, btw: BtwService) {
               socket.end();
               return;
             }
-            if (request.kind === "btw-open" || request.kind === "btw-promote") {
+            if (request.kind === "btw-open") {
               if (!request.threadId)
                 throw new Error("BTW thread ID is required");
               const thread = btw.getThread(request.threadId, ctx);
-              if (request.kind === "btw-open") {
-                reply(socket, { id: request.id, status: "done", thread });
-                socket.end();
-                return;
-              }
-              request.message = formatBtwRequest(thread);
+              reply(socket, { id: request.id, status: "done", thread });
+              socket.end();
+              return;
             }
             if (request.kind === "btw") {
               if (questions.size >= 3)

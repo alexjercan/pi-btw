@@ -224,150 +224,68 @@ test("setup exposes commands without installing mappings", () => {
     plugin.setup({ target = "%42" })
     plugin.setup({ target = "%42" }) -- setup is repeatable
     assert(require("pi_btw.config").options.target == "%42")
-    for _, name in ipairs({ "BtwAsk", "BtwComment", "BtwQueue", "BtwOpen", "PiBtw", "BtwSend", "BtwFollowup", "BtwConnect", "BtwList", "BtwStatus", "BtwThreads" }) do
+    for _, name in ipairs({ "BtwNote", "BtwAsk", "BtwRequest", "BtwQueue", "BtwSend", "BtwSendRequest", "BtwSendThread", "BtwThreads", "BtwOpen", "BtwConnect", "BtwList", "BtwStatus" }) do
       assert(vim.fn.exists(":" .. name) == 2, name)
     end
-    for _, mode in ipairs({ "n", "x" }) do
-      for _, key in ipairs({ "n", "b", "q", "f" }) do assert(vim.fn.maparg(" " .. key, mode) == "") end
+    for _, gone in ipairs({ "BtwComment", "BtwFollowup", "PiBtw" }) do
+      assert(vim.fn.exists(":" .. gone) == 0, gone)
     end
-    vim.cmd.BtwQueue()
-    assert(vim.api.nvim_win_get_config(0).relative == "")
-    assert(#vim.api.nvim_list_wins() == 2)
+    for _, mode in ipairs({ "n", "x" }) do
+      for _, key in ipairs({ "bn", "bb", "bq", "bp", "bt", "br" }) do assert(vim.fn.maparg(" " .. key, mode) == "") end
+    end
     assert(#vim.api.nvim_buf_get_keymap(0, "n") == 0)
   `);
 });
 
-test("thread split supports commands, source-pinned follow-ups, promotion, and late replies", () => {
-  runLua(`
-    local thread = { id = "btw-12345678", exchanges = {} }
-    local source = { pane = "%7", socket = "/old/socket", label = "work:7.0" }
-    local promoted, late_callback, late_finished = 0
-    require("pi_btw").setup()
-    package.loaded["pi_btw.bridge"] = {
-      ask = function(question, callback, id, finished, target)
-        if id then
-          assert(id == thread.id and target == source)
-          if question == "Late" then late_callback, late_finished = callback, finished; return end
-        end
-        table.insert(thread.exchanges, { question = question, answer = "Because.\\n" .. string.rep("More detail\\n", 80) })
-        if finished then finished() end
-        callback(vim.deepcopy(thread), source)
-      end,
-      promote = function(id, accepted, finished, target)
-        assert(id == thread.id and target == source)
-        promoted = promoted + 1; accepted(); finished()
-      end,
-      open_thread = function(id, callback) assert(id == thread.id); callback(vim.deepcopy(thread), source) end,
-    }
-    local btw = require("pi_btw.threads")
-    btw.ask("Why?\\n\\n/code.ts:4")
-    local function text() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\\n") end
-    assert(vim.bo.filetype == "markdown" and not vim.bo.modifiable)
-    assert(vim.api.nvim_win_get_config(0).relative == "")
-    assert(text():find("Because.", 1, true))
-    vim.cmd("BtwFollowup Follow up")
-    assert(#thread.exchanges == 2)
-    vim.cmd.BtwSend(); vim.cmd.BtwSend()
-    assert(promoted == 1)
-    assert(text():find("Sent to the main agent", 1, true))
-    assert(vim.api.nvim_buf_line_count(0) > vim.api.nvim_win_get_height(0))
-    vim.cmd.close()
-    vim.cmd("BtwOpen " .. thread.id)
-    assert(text():find("Follow up", 1, true))
-    vim.cmd("BtwFollowup Late")
-    vim.cmd.close()
-    local count = #vim.api.nvim_list_wins()
-    late_finished(); late_callback(vim.deepcopy(thread))
-    assert(#vim.api.nvim_list_wins() == count, "Late replies must not reopen closed splits")
-    -- Same ID at another Pi must have a separate buffer.
-    btw.show(thread, { pane = "%8", socket = "/new/socket", label = "other" })
-    assert(#vim.fn.getbufinfo() >= 3)
-  `);
-});
-
-test("quickfix lists source-pinned threads and native navigation loads their buffers", () => {
-  runLua(`
-    local source = { pane = "%7", socket = "/socket", label = "work:7.0" }
-    require("pi_btw").setup()
-    local opened = 0
-    package.loaded["pi_btw.bridge"] = {
-      list_threads = function(callback) callback({ { id = "btw-12345678", question = "Why?" } }, source) end,
-      open_thread = function(id, callback, target)
-        assert(target == source)
-        opened = opened + 1
-        callback({ id = id, exchanges = { { question = "Why?", answer = "Because." } } })
-      end,
-    }
-    vim.cmd.BtwThreads()
-    assert(vim.bo.buftype == "quickfix")
-    assert(vim.fn.getqflist()[1].text == "btw-12345678 Why?")
-    vim.cmd.cfirst()
-    assert(opened == 1)
-    assert(vim.bo.filetype == "markdown")
-    assert(table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\\n"):find("Because.", 1, true))
-    vim.cmd.BtwThreads()
-    vim.cmd.cfirst()
-    assert(opened == 2)
-  `);
-});
-
-test("editable project queue persists, batches, and retains failed or edited drafts", () => {
-  const temp = mkdtempSync(join(tmpdir(), "pi-queue-test-"));
+test("the prompt window is a floating modal that toggles, edits, and appends", () => {
+  const temp = mkdtempSync(join(tmpdir(), "pi-prompt-test-"));
   mkdirSync(join(temp, "project", ".git"), { recursive: true });
-  mkdirSync(join(temp, "other"));
   const setup = `
     require("pi_btw").setup()
     vim.cmd.cd(${JSON.stringify(join(temp, "project"))})
-    local sent, accept, finish
-    package.loaded["pi_btw.bridge"] = { send = function(message, accepted, finished)
-      sent, accept, finish = message, accepted, finished
-    end }
     local queue = require("pi_btw.queue")
-    local function send() vim.cmd.BtwSend() end
     local function text() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\\n") end
+    local function float()
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(win).relative == "editor" then return win end
+      end
+    end
   `;
   try {
     runLua(
       setup +
         `
-      queue.add(queue.project(), "First comment\\n\\n/tmp/a.lua:3-5")
-      queue.add(queue.project(), "Second comment\\n\\nFolder: /tmp/src")
+      local code = vim.api.nvim_get_current_win()
       vim.cmd.BtwQueue()
-      assert(text():find("Second comment", 1, true))
-      vim.api.nvim_buf_set_lines(0, 0, 1, false, { "Edited comment" })
+      local win = float()
+      assert(win and win == vim.api.nvim_get_current_win(), "Prompt must open as a focused float")
+      local config = vim.api.nvim_win_get_config(win)
+      assert(config.border ~= "none" and config.width >= 20 and config.height >= 5)
+      assert(vim.bo.modifiable and vim.bo.filetype == "markdown")
+      assert(#vim.api.nvim_buf_get_keymap(0, "n") == 0, "No buffer mappings in an editable prompt")
+      vim.cmd.BtwQueue()
+      assert(not float() and vim.api.nvim_get_current_win() == code, "Toggle closes the float")
+      queue.add(queue.project(), "/tmp/a.lua:3-5\\nFirst note")
+      vim.cmd.BtwQueue()
+      assert(text() == "/tmp/a.lua:3-5\\nFirst note")
+      vim.api.nvim_buf_set_lines(0, -1, -1, false, { "Typed inside the modal" })
+      vim.api.nvim_win_set_cursor(0, { 2, 3 })
+      queue.add(queue.project(), "/tmp/b.lua:7\\nSecond note")
+      assert(text() == "/tmp/a.lua:3-5\\nFirst note\\nTyped inside the modal\\n\\n/tmp/b.lua:7\\nSecond note")
+      assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), { 2, 3 }), "Appending must not move the cursor")
+      vim.api.nvim_set_current_win(code)
+      assert(float(), "Leaving keeps the float open")
+      vim.cmd.BtwQueue()
+      assert(vim.api.nvim_get_current_win() == float(), "Toggle focuses an open float")
     `,
       temp,
     );
     runLua(
       setup +
         `
-      local current, windows = vim.api.nvim_get_current_buf(), #vim.api.nvim_list_wins()
-      send()
-      assert(sent:find("Edited comment", 1, true), "Send must load the saved queue without opening it")
-      assert(vim.api.nvim_get_current_buf() == current and #vim.api.nvim_list_wins() == windows)
-      local first_send = accept
-      send(); assert(accept == first_send, "Do not send the queue twice while busy")
-      finish() -- failed send must retain the draft
       vim.cmd.BtwQueue()
-      assert(text():find("Edited comment", 1, true), "Draft did not survive restart")
-      local draft = text()
-      send(); assert(sent == draft); finish()
-      assert(text() == draft)
-      send(); queue.add(queue.project(), "Appended while sending"); accept(); finish()
-      assert(not text():find("Edited comment", 1, true))
-      assert(text():find("Appended while sending", 1, true))
-      send(); vim.api.nvim_buf_set_lines(0, 0, -1, false, { "Changed during send" }); accept(); finish()
-      assert(text() == "Changed during send")
-      send(); accept(); finish(); assert(text() == "")
-      queue.add(queue.project(), "Original project pending")
-      vim.cmd.cd(${JSON.stringify(join(temp, "other"))})
-      vim.cmd.enew()
-      sent = nil
-      send(); assert(sent == nil, "An empty project queue must not send another project's draft")
-      queue.add(queue.project(), "Other project pending")
-      send(); assert(sent == "Other project pending")
-      accept(); finish()
-      vim.cmd.BtwQueue(); assert(text() == "", "Queues must be project-specific")
+      assert(text():find("Typed inside the modal", 1, true), "Draft must survive restart")
+      assert(text():find("Second note", 1, true))
     `,
       temp,
     );
@@ -376,7 +294,195 @@ test("editable project queue persists, batches, and retains failed or edited dra
   }
 });
 
-test("command arguments and ranges preserve file and netrw references without sending comments", () => {
+test("sending the prompt goes to Pi outside threads and clears only unchanged drafts", () => {
+  const temp = mkdtempSync(join(tmpdir(), "pi-send-test-"));
+  mkdirSync(join(temp, "project", ".git"), { recursive: true });
+  mkdirSync(join(temp, "other"));
+  const setup = `
+    require("pi_btw").setup()
+    vim.cmd.cd(${JSON.stringify(join(temp, "project"))})
+    local sent, accept, finish
+    package.loaded["pi_btw.bridge"] = {
+      send = function(message, accepted, finished) sent, accept, finish = message, accepted, finished end,
+      ask = function() error("Must not ask a thread outside thread buffers") end,
+    }
+    local queue = require("pi_btw.queue")
+    local function send() vim.cmd.BtwSend() end
+    local function text() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\\n") end
+    local function float()
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(win).relative == "editor" then return win end
+      end
+    end
+  `;
+  try {
+    runLua(
+      setup +
+        `
+      queue.add(queue.project(), "/tmp/a.lua:3-5\\nEdited comment")
+      local current, windows = vim.api.nvim_get_current_buf(), #vim.api.nvim_list_wins()
+      send()
+      assert(sent:find("Edited comment", 1, true), "Send must load the saved prompt without opening it")
+      assert(vim.api.nvim_get_current_buf() == current and #vim.api.nvim_list_wins() == windows)
+      local first_send = accept
+      send(); assert(accept == first_send, "Do not send the prompt twice while busy")
+      finish() -- failed send must retain the draft
+      vim.cmd.BtwQueue()
+      assert(text():find("Edited comment", 1, true))
+      local draft = text()
+      send(); assert(sent == draft); finish()
+      assert(text() == draft)
+      send(); queue.add(queue.project(), "Appended while sending"); accept(); finish()
+      assert(float(), "A leftover draft keeps the modal open")
+      assert(not text():find("Edited comment", 1, true))
+      assert(text() == "Appended while sending", text())
+      send(); vim.api.nvim_buf_set_lines(0, 0, -1, false, { "Changed during send" }); accept(); finish()
+      assert(text() == "Changed during send")
+      assert(float(), "An edited draft keeps the modal open")
+      send(); accept(); finish()
+      assert(not float(), "A sent prompt closes the modal")
+      vim.cmd.BtwQueue(); assert(text() == "")
+      vim.cmd.BtwQueue()
+      queue.add(queue.project(), "Original project pending")
+      vim.cmd.cd(${JSON.stringify(join(temp, "other"))})
+      vim.cmd.enew()
+      sent = nil
+      send(); assert(sent == nil, "An empty project prompt must not send another project's draft")
+      queue.add(queue.project(), "Other project pending")
+      vim.cmd.BtwSendRequest(); assert(sent == "Other project pending")
+      accept(); finish()
+      vim.cmd.BtwQueue(); assert(text() == "", "Prompts are project-specific")
+    `,
+      temp,
+    );
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("thread splits are read-only chats; sending inside one continues it", () => {
+  const temp = mkdtempSync(join(tmpdir(), "pi-thread-test-"));
+  mkdirSync(join(temp, "project", ".git"), { recursive: true });
+  try {
+    runLua(
+      `
+    require("pi_btw").setup()
+    vim.cmd.cd(${JSON.stringify(join(temp, "project"))})
+    local thread = { id = "btw-12345678", exchanges = {} }
+    local source = { pane = "%7", socket = "/old/socket", label = "work:7.0" }
+    local asked, late_callback, late_finished, prompts = {}, nil, nil, 0
+    package.loaded["pi_btw.bridge"] = {
+      send = function(_, accepted, finished) prompts = prompts + 1; accepted(); finished() end,
+      ask = function(question, callback, id, finished, target)
+        table.insert(asked, { question = question, id = id, target = target })
+        if id then
+          assert(id == thread.id and target == source)
+          if question == "Late" then late_callback, late_finished = callback, finished; return end
+        end
+        table.insert(thread.exchanges, { question = question, answer = "Because.\\n" .. string.rep("More detail\\n", 80) })
+        if finished then finished() end
+        callback(vim.deepcopy(thread), source)
+      end,
+      open_thread = function(id, callback) assert(id == thread.id); callback(vim.deepcopy(thread), source) end,
+    }
+    local threads = require("pi_btw.threads")
+    local queue = require("pi_btw.queue")
+    local function text() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\\n") end
+    local code = vim.api.nvim_get_current_win()
+    threads.ask("Why?\\n\\n/code.ts:4")
+    assert(asked[1].id == nil, "A first question starts a new thread")
+    assert(vim.bo.filetype == "markdown" and not vim.bo.modifiable)
+    assert(vim.api.nvim_win_get_config(0).relative == "" and #vim.api.nvim_list_wins() == 2)
+    assert(text():find("## You", 1, true) and text():find("## BTW", 1, true) and text():find("Because.", 1, true))
+    assert(vim.api.nvim_win_get_cursor(0)[1] == vim.api.nvim_buf_line_count(0), "Latest answer is in view")
+    -- Sending inside the thread continues it and clears the prompt.
+    queue.add(queue.project(), "/code.ts:9\\nFollow up")
+    vim.cmd.BtwSend()
+    assert(#asked == 2 and asked[2].id == thread.id and asked[2].question == "/code.ts:9\\nFollow up")
+    assert(#thread.exchanges == 2 and prompts == 0)
+    vim.cmd.BtwQueue(); assert(text() == "", "Accepted prompt is cleared"); vim.cmd.BtwQueue()
+    -- Sending from the code window goes to Pi, not the thread.
+    vim.api.nvim_set_current_win(code)
+    queue.add(queue.project(), "Main request")
+    vim.cmd.BtwSend()
+    assert(prompts == 1 and #asked == 2)
+    -- BtwSendThread from code continues the visible thread; BtwAsk too.
+    queue.add(queue.project(), "Thread request")
+    vim.cmd.BtwSendThread()
+    assert(#asked == 3 and asked[3].id == thread.id and asked[3].question == "Thread request")
+    vim.cmd("BtwAsk Quick question")
+    assert(#asked == 4 and asked[4].id == thread.id)
+    -- BtwAsk inside the thread is a plain follow-up without a file reference.
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win)):find("^btw://") then vim.api.nvim_set_current_win(win) end
+    end
+    assert(threads.current(), "Thread window must be current")
+    vim.cmd("BtwAsk Inside")
+    assert(asked[#asked].question == "Inside" and asked[#asked].id == thread.id)
+    -- Late replies after closing never reopen the split.
+    queue.add(queue.project(), "Late")
+    vim.cmd.BtwSend()
+    assert(text():find("Waiting for Pi", 1, true))
+    vim.cmd.close()
+    local count = #vim.api.nvim_list_wins()
+    late_finished(); late_callback(vim.deepcopy(thread))
+    assert(#vim.api.nvim_list_wins() == count, "Late replies must not reopen closed splits")
+    -- With no thread open, BtwSendThread starts a new one.
+    queue.add(queue.project(), "Fresh")
+    vim.cmd.BtwSendThread()
+    assert(asked[#asked].id == nil and asked[#asked].question == "Fresh")
+    assert(#vim.api.nvim_list_wins() == count + 1)
+    -- An explicit ID opens that thread first.
+    vim.cmd.close()
+    queue.add(queue.project(), "By ID")
+    vim.cmd("BtwSendThread " .. thread.id)
+    assert(asked[#asked].id == thread.id and asked[#asked].question == "By ID")
+    -- Same ID at another Pi must have a separate buffer.
+    threads.show(thread, { pane = "%8", socket = "/new/socket", label = "other" })
+    assert(#vim.fn.getbufinfo() >= 3)
+  `,
+      temp,
+    );
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("the thread picker lists Pi's threads newest first and opens the choice in a split", () => {
+  runLua(`
+    local source = { pane = "%7", socket = "/socket", label = "work:7.0" }
+    require("pi_btw").setup()
+    local opened, shown = 0, nil
+    package.loaded["pi_btw.bridge"] = {
+      list_threads = function(callback)
+        callback({ { id = "btw-11111111", question = "Older?" }, { id = "btw-22222222", question = "Newer?\\n\\n/x.lua:1" } }, source)
+      end,
+      open_thread = function(id, callback, target)
+        assert(target == source)
+        opened = opened + 1
+        callback({ id = id, exchanges = { { question = "Why?", answer = "Because." } } }, source)
+      end,
+    }
+    vim.ui.select = function(items, options, callback)
+      shown = vim.tbl_map(options.format_item, items)
+      callback(items[1])
+    end
+    vim.cmd.BtwThreads()
+    assert(shown[1] == "btw-22222222  Newer?" and shown[2] == "btw-11111111  Older?", vim.inspect(shown))
+    assert(opened == 1)
+    assert(vim.bo.filetype == "markdown" and vim.api.nvim_win_get_config(0).relative == "")
+    assert(table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\\n"):find("Because.", 1, true))
+    vim.cmd.BtwThreads()
+    assert(opened == 2 and #vim.api.nvim_list_wins() == 2, "Reopening reuses the split")
+    package.loaded["pi_btw.bridge"].list_threads = function(callback) callback({}, source) end
+    local notice
+    vim.notify = function(message) notice = message end
+    vim.cmd.BtwThreads()
+    assert(notice:find("No BTW threads", 1, true))
+  `);
+});
+
+test("annotations carry file, range, and netrw references and respect each command's target", () => {
   const temp = mkdtempSync(join(tmpdir(), "pi-reference-test-"));
   mkdirSync(join(temp, "folder"));
   writeFileSync(join(temp, "a file.lua"), "one\ntwo\nthree\n");
@@ -384,32 +490,53 @@ test("command arguments and ranges preserve file and netrw references without se
     runLua(
       `
       require("pi_btw").setup()
-      local queued, question
+      local queued, question, requested
       package.loaded["pi_btw.queue"] = {
         project = function() return "project" end,
         add = function(project, message) assert(project == "project"); queued = message end,
       }
-      package.loaded["pi_btw.bridge"] = nil
-      package.preload["pi_btw.bridge"] = function() error("Comments must not contact Pi directly") end
-      package.loaded["pi_btw.threads"] = { ask = function(message) question = message end }
-      vim.ui.input = function(_, callback) callback("Please review") end
+      package.loaded["pi_btw.threads"] = {
+        active = function() return nil end,
+        ask = function(message, state) assert(state == nil); question = message end,
+      }
+      package.loaded["pi_btw.bridge"] = { send = function(message) requested = message end }
+      local answer = "Please review"
+      vim.ui.input = function(_, callback) callback(answer) end
       vim.cmd.edit(${JSON.stringify(join(temp, "a file.lua"))})
       vim.api.nvim_win_set_cursor(0, { 2, 0 })
-      vim.cmd.BtwComment()
-      assert(queued:find("a file.lua:2", 1, true))
-      vim.cmd("1,3BtwComment Review range")
-      assert(queued:find("Review range", 1, true) and queued:find("a file.lua:1-3", 1, true))
+      vim.cmd.BtwNote()
+      assert(queued == ${JSON.stringify(join(temp, "a file.lua"))} .. ":2\\nPlease review", queued)
+      answer = ""
+      vim.cmd.BtwNote()
+      assert(queued == ${JSON.stringify(join(temp, "a file.lua"))} .. ":2", "An empty note keeps the reference")
+      answer = nil
+      queued = nil
+      vim.cmd.BtwNote()
+      assert(queued == nil, "Cancelling adds nothing")
+      vim.cmd("1,3BtwNote Review range")
+      assert(queued:find("a file.lua:1-3\\nReview range", 1, true))
       vim.cmd("1,3BtwAsk Why this?")
-      assert(question:find("Why this?", 1, true) and question:find("a file.lua:1-3", 1, true))
+      assert(question:find("a file.lua:1-3\\nWhy this?", 1, true))
+      vim.cmd("2BtwRequest Do this")
+      assert(requested:find("a file.lua:2\\nDo this", 1, true))
       vim.cmd.enew()
       vim.api.nvim_buf_set_name(0, ${JSON.stringify(temp)})
       vim.bo.filetype = "netrw"
       vim.b.netrw_curdir = ${JSON.stringify(temp)}
       vim.b.netrw_liststyle = 0
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { "a file.lua", "folder/" })
-      vim.cmd("1,2BtwComment Please review")
+      vim.cmd("1,2BtwNote Please review")
       assert(queued:find("File: " .. ${JSON.stringify(join(temp, "a file.lua"))}, 1, true))
       assert(queued:find("Folder: " .. ${JSON.stringify(join(temp, "folder"))}, 1, true))
+      -- Scratch buffers add plain text without a reference.
+      vim.cmd.enew()
+      vim.bo.buftype = "nofile"
+      queued = nil
+      vim.cmd("BtwNote Plain text")
+      assert(queued == "Plain text", queued)
+      answer = ""
+      vim.cmd.BtwNote()
+      assert(queued == "Plain text", "Empty text in a scratch buffer adds nothing")
     `,
       temp,
     );

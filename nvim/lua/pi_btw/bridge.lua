@@ -253,7 +253,7 @@ local function request(message, kind, accepted, finished, answer, thread_id, sou
               set_progress(response.status)
               if not acknowledged then
                 acknowledged = true
-                if kind == "prompt" or kind == "btw-promote" then
+                if kind == "prompt" then
                   timer:stop()
                 end
                 if accepted then
@@ -307,10 +307,6 @@ end
 
 function M.open_thread(thread_id, answer, source)
   request("Open BTW thread", "btw-open", nil, nil, thread_answer(answer), thread_id, source)
-end
-
-function M.promote(thread_id, accepted, finished, source)
-  request("Send BTW thread", "btw-promote", accepted, finished, nil, thread_id, source)
 end
 
 function M.status()

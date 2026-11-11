@@ -4,6 +4,12 @@ import type {
   ExtensionContext,
   FileEntry,
 } from "@earendil-works/pi-coding-agent";
+import {
+  readBtwSettings,
+  resolveModel,
+  settingsPaths,
+  type BtwSettings,
+} from "./settings.ts";
 
 type SDK = typeof import("@earendil-works/pi-coding-agent");
 type TextComponent = typeof import("@earendil-works/pi-tui").Text;
@@ -31,8 +37,11 @@ export interface BtwService {
   getThread(id: string, ctx: ExtensionContext): BtwThread;
   listThreads(ctx: ExtensionContext): Array<{ id: string; question: string }>;
 }
+export type LoadBtwSettings = (ctx: ExtensionContext) => BtwSettings;
 
 const ENTRY = "nvim-btw";
+/** Side threads only ever inspect the project. This is not configurable. */
+export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 const SYSTEM = `Answer the user's side question about code. Be concise and direct.
 You are separate from the main coding agent. Do not continue its task or make changes.
 You may only inspect files with the provided read-only tools. Do not propose to execute changes.
@@ -42,22 +51,12 @@ interface BtwEntry extends BtwExchange {
   thread?: StoredThread;
 }
 
-export function formatBtwRequest(thread: BtwThread): string {
-  return (
-    `Implement the work discussed in BTW thread ${thread.id}. Use the following read-only discussion as context, and clarify any unresolved requirements before making changes.\n\n` +
-    thread.exchanges
-      .map(
-        ({ question, answer, error }) =>
-          `User:\n${question}\n\nBTW:\n${error ? `Error: ${error}` : answer}`,
-      )
-      .join("\n\n---\n\n")
-  );
-}
-
 export function createBtw(
   pi: ExtensionAPI,
   sdk: SDK,
   Text: TextComponent,
+  loadSettings: LoadBtwSettings = (ctx) =>
+    readBtwSettings(settingsPaths(ctx.cwd, sdk.getAgentDir())),
 ): BtwService {
   const busy = new Set<string>();
   const key = (id: string, ctx: ExtensionContext) =>
@@ -75,19 +74,14 @@ export function createBtw(
       `Unknown BTW thread: ${id} (not on the active session branch)`,
     );
   };
-  pi.registerEntryRenderer<BtwEntry>(ENTRY, (entry, { expanded }, theme) => {
+  // Plain text in full, so an answer can be selected and pasted from Pi.
+  pi.registerEntryRenderer<BtwEntry>(ENTRY, (entry, _options, theme) => {
     const { question, answer, error, thread } = entry.data!;
-    const heading = theme.fg(
-      "accent",
-      `BTW ${thread?.id ?? ""} (read-only side question)`,
-    );
+    const id = thread?.id ?? "";
+    const heading = theme.fg("accent", `BTW ${id}`);
+    const hint = theme.fg("dim", `read-only; follow up with /btw ${id} ...`);
     const body = error ? `Error: ${error}` : answer!;
-    const preview = expanded ? body : body.split("\n").slice(0, 4).join("\n");
-    return new Text(
-      `${heading}\n${question}\n\n${preview}${expanded ? "" : "\n(expand for full answer)"}`,
-      0,
-      1,
-    );
+    return new Text(`${heading}  ${hint}\n\n${question}\n\n${body}`, 0, 1);
   });
 
   return {
@@ -111,7 +105,8 @@ export function createBtw(
       return { id, exchanges };
     },
     async ask(question, ctx, signal, threadId) {
-      if (!ctx.model) throw new Error("No Pi model selected");
+      const settings = loadSettings(ctx);
+      const model = resolveModel(settings.model, ctx.modelRegistry, ctx.model);
       let thread: StoredThread;
       if (threadId) {
         thread = load(threadId, ctx);
@@ -195,9 +190,9 @@ export function createBtw(
         );
         ({ session } = await sdk.createAgentSession({
           cwd: thread.cwd,
-          model: ctx.model,
-          thinkingLevel: "off",
-          tools: ["read", "grep", "find", "ls"],
+          model,
+          thinkingLevel: settings.thinkingLevel ?? "off",
+          tools: READ_ONLY_TOOLS,
           resourceLoader,
           settingsManager,
           sessionManager,
